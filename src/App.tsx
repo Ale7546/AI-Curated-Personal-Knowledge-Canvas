@@ -15,17 +15,6 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  Sparkles,
-  RefreshCw,
-  MessageSquare,
-  ChevronLeft,
-  ChevronRight,
-  Database,
-  Image as ImageIcon,
-  Link2,
-  FileText,
-  Trash2,
-  FolderPlus,
   LogOut,
   Settings,
 } from 'lucide-react';
@@ -42,6 +31,8 @@ import { AIProposedEdge } from './components/edges/AIProposedEdge';
 
 import { AuthGateway } from './components/AuthGateway';
 import { LLMSelectorModal } from './components/LLMSelectorModal';
+import { SidebarControls } from './components/SidebarControls';
+import { ChatPanel } from './components/ChatPanel';
 
 const nodeTypes = {
   textNote: TextNoteNode,
@@ -61,6 +52,7 @@ interface Message {
 
 // Inner Canvas Component that has access to useReactFlow
 const CanvasWorkspace: React.FC<{
+  activeUser: LocalUser;
   isOllamaOnline: boolean;
   isAnalyzing: boolean;
   setIsAnalyzing: (v: boolean) => void;
@@ -72,6 +64,7 @@ const CanvasWorkspace: React.FC<{
   setShowLLMSelector: (v: boolean) => void;
   onLogout: () => void;
 }> = ({
+  activeUser,
   isOllamaOnline,
   isAnalyzing,
   setIsAnalyzing,
@@ -575,68 +568,20 @@ const CanvasWorkspace: React.FC<{
         <Background variant={BackgroundVariant.Dots} color="var(--bg-grid)" gap={16} size={1} />
       </ReactFlow>
 
-      {/* Floating Left Control Sidebar */}
-      <div className={`left-sidebar glass-panel nodrag ${leftSidebarCollapsed ? 'collapsed' : ''}`}>
-        <button
-          className="left-sidebar-toggle nodrag"
-          onClick={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
-          title={leftSidebarCollapsed ? 'Open Canvas Hub' : 'Collapse Panel'}
-        >
-          {leftSidebarCollapsed ? <ChevronRight className="icon" /> : <ChevronLeft className="icon" />}
-        </button>
-
-        <h2 className="sidebar-title">
-          <Database className="icon" /> Canvas Hub
-        </h2>
-
-        <div className="status-bar">
-          <span className={`status-dot ${isBrainReady ? 'online' : 'offline'}`} />
-          <span>AI Status: {getBrainStatusText()}</span>
-        </div>
-
-        <div className="sidebar-section">
-          <span className="sidebar-section-title">Add Element</span>
-          <button className="btn btn-secondary" onClick={() => addNode('textNote')}>
-            <FileText className="icon-sm" /> Text Note
-          </button>
-          <button className="btn btn-secondary" onClick={() => addNode('linkCard')}>
-            <Link2 className="icon-sm" /> Web Link
-          </button>
-          <button className="btn btn-secondary" onClick={() => addNode('imageCard')}>
-            <ImageIcon className="icon-sm" /> Image Card
-          </button>
-          <button className="btn btn-secondary" onClick={() => addNode('clusterGroup')}>
-            <FolderPlus className="icon-sm" /> Group Frame
-          </button>
-        </div>
-
-        <div className="sidebar-section">
-          <span className="sidebar-section-title">AI Actions</span>
-          <button
-            className="btn btn-primary"
-            onClick={handleAnalyzeCanvas}
-            disabled={!isBrainReady || isAnalyzing}
-          >
-            <Sparkles className={`icon-sm ${isAnalyzing ? 'spinning' : ''}`} />
-            {isAnalyzing ? 'Scanning with AI...' : 'Analyze Canvas'}
-          </button>
-        </div>
-
-        <div className="sidebar-section" style={{ marginTop: 'auto' }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowLLMSelector(true)}>
-            <Settings className="icon-sm" /> AI Config
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={loadDemoData}>
-            <RefreshCw className="icon-sm" /> Load Demo
-          </button>
-          <button className="btn btn-danger btn-sm" onClick={clearCanvas}>
-            <Trash2 className="icon-sm" /> Clear Canvas
-          </button>
-          <button className="btn btn-danger btn-sm" onClick={onLogout} style={{ marginTop: '8px' }}>
-            <LogOut className="icon-sm" /> Log Out
-          </button>
-        </div>
-      </div>
+      <SidebarControls
+        activeUser={activeUser}
+        isBrainReady={isBrainReady}
+        isAnalyzing={isAnalyzing}
+        getBrainStatusText={getBrainStatusText}
+        addNode={addNode}
+        handleAnalyzeCanvas={handleAnalyzeCanvas}
+        loadDemoData={loadDemoData}
+        clearCanvas={clearCanvas}
+        leftSidebarCollapsed={leftSidebarCollapsed}
+        setLeftSidebarCollapsed={setLeftSidebarCollapsed}
+        setShowLLMSelector={setShowLLMSelector}
+        onLogout={onLogout}
+      />
     </div>
   );
 };
@@ -848,6 +793,7 @@ export default function App() {
 
       <ReactFlowProvider>
         <CanvasWorkspace
+          activeUser={activeUser}
           isOllamaOnline={isOllamaOnline}
           isAnalyzing={isAnalyzing}
           setIsAnalyzing={setIsAnalyzing}
@@ -861,77 +807,18 @@ export default function App() {
         />
       </ReactFlowProvider>
 
-      {/* Right Sidebar Collapsible AI Chat */}
-      <div className={`right-sidebar glass-panel ${isChatCollapsed ? 'collapsed' : ''}`}>
-        <button
-          className="right-sidebar-toggle nodrag"
-          onClick={() => setIsChatCollapsed(!isChatCollapsed)}
-          title={isChatCollapsed ? 'Open AI Chat' : 'Collapse Panel'}
-        >
-          {isChatCollapsed ? (
-            <ChevronLeft className="icon" />
-          ) : (
-            <ChevronRight className="icon" />
-          )}
-        </button>
-
-        <div className="chat-header">
-          <h2 className="sidebar-title">
-            <MessageSquare className="icon" /> AI Assistant
-          </h2>
-          <div className="status-bar" style={{ marginTop: '8px' }}>
-            <span className={`status-dot ${isLlmOnline ? 'online' : 'offline'}`} />
-            <span>Chat: {llmConfig ? (llmConfig.provider === 'ollama' ? 'Local Ollama' : 'Cloud API') : 'Offline'}</span>
-          </div>
-        </div>
-
-        <div className="chat-messages">
-          {chatMessages.map((msg, index) => (
-            <div key={index} className={`chat-message ${msg.role}`}>
-              {msg.content}
-            </div>
-          ))}
-          {isChatLoading && (
-            <div className="chat-message assistant">
-              <div className="chat-message-loader">
-                <div className="chat-dot" />
-                <div className="chat-dot" />
-                <div className="chat-dot" />
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-
-        <form className="chat-input-area" onSubmit={handleSendChatMessage}>
-          <textarea
-            className="chat-textarea"
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            placeholder={
-              !llmConfig
-                ? 'AI Brain not configured...'
-                : isLlmOnline
-                ? 'Ask about your notes...'
-                : 'Ollama Offline...'
-            }
-            disabled={!isLlmOnline || isChatLoading}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSendChatMessage(e);
-              }
-            }}
-          />
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={!isLlmOnline || isChatLoading || !chatInput.trim()}
-          >
-            Send
-          </button>
-        </form>
-      </div>
+      <ChatPanel
+        isChatCollapsed={isChatCollapsed}
+        setIsChatCollapsed={setIsChatCollapsed}
+        isLlmOnline={isLlmOnline}
+        llmConfig={llmConfig}
+        chatMessages={chatMessages}
+        chatInput={chatInput}
+        setChatInput={setChatInput}
+        isChatLoading={isChatLoading}
+        handleSendChatMessage={handleSendChatMessage}
+        messagesEndRef={messagesEndRef}
+      />
     </div>
   );
 }

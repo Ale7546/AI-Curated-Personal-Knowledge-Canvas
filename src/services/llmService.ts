@@ -238,7 +238,8 @@ CRITICAL GUIDELINES:
    - If empty (0 nodes): Welcome the user to their blank canvas. Provide 3 quick, bulleted actions they can perform right now. Offer to kickstart the canvas by generating a structure (e.g., "Would you like me to write a template node for career planning, a project roadmap, or study topics?").
    - If 1 node: Acknowledge what the node is (referencing its title). Proactively offer to expand it (e.g., generate 3 subtopics or draft some initial body content for it).
    - If multiple nodes (unconnected): Mention the cards by name and briefly suggest how they might relate. Remind the user they can draw lines between them, or click "Analyze Canvas" on the left to let the AI draft connections.
-   - If connected nodes: Summarize the emerging web of thoughts. Point out any "lonely" nodes that don't have connections yet, asking how they fit into the bigger picture.`;
+   - If connected nodes: Summarize the emerging web of thoughts. Point out any "lonely" nodes that don't have connections yet, asking how they fit into the bigger picture.
+6. Output formatting: You MUST use double-newlines (\\n\\n) between separate ideas, numbered points, or bullet list items. Do not merge list items into a single paragraph.`;
 
   const userContent = `Here is the current state of my canvas:
 Nodes:
