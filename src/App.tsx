@@ -180,7 +180,7 @@ const CanvasWorkspace: React.FC<{
         isOllamaOnline,
         llmConfig: llmConfig || undefined,
       },
-      style: n.type === 'clusterGroup' ? { width: n.width || 450, height: n.height || 380, zIndex: 1 } : { zIndex: 5 },
+      style: n.type === 'clusterGroup' ? { width: n.width || 380, height: n.height || 280, zIndex: 1 } : { zIndex: 5 },
       dragHandle: n.type === 'clusterGroup' ? '.cluster-header' : undefined,
       extent: n.parentId ? 'parent' : undefined,
     }));
@@ -310,8 +310,8 @@ const CanvasWorkspace: React.FC<{
         id: nodeId,
         type: 'clusterGroup',
         position: flowPosition,
-        width: 450,
-        height: 380,
+        width: 380,
+        height: 280,
         data: {
           title: 'New Cluster Group',
           content: '',
@@ -424,8 +424,8 @@ const CanvasWorkspace: React.FC<{
         const padding = 60;
         const groupX = minX - padding;
         const groupY = minY - padding - 30;
-        const groupW = Math.max(450, maxX - minX + padding * 2 + 150);
-        const groupH = Math.max(380, maxY - minY + padding * 2 + 100);
+        const groupW = Math.max(380, maxX - minX + padding * 2 + 120);
+        const groupH = Math.max(280, maxY - minY + padding * 2 + 80);
 
         const clusterId = `cluster-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
@@ -743,31 +743,63 @@ export default function App() {
     setIsChatLoading(true);
 
     try {
-      // Gather current nodes summary for Canvas Aware Chat
+      // Gather current nodes and edges state from IndexedDB
       const dbNodes = await db.nodes.toArray();
-      const textNodes = dbNodes.filter((n) => n.type === 'textNote' || n.type === 'linkCard');
+      const dbEdges = await db.edges.toArray();
 
-      let contextStr = '';
-      if (textNodes.length > 0) {
-        contextStr = `
-You are helping the user manage their personal knowledge canvas.
-Here is the current state of notes mapped on the user's canvas:
-${textNodes
-  .map(
-    (n) =>
-      `- [${n.type === 'textNote' ? 'Note' : 'Link'}] "${n.data.title || 'Untitled'}" : ${
-        n.data.content || n.data.description || '(empty)'
-      } (Tags: ${n.data.tags?.join(', ') || 'none'})`
-  )
-  .join('\n')}
+      // Clean node representation for LLM context, removing functions, state variables, and large binary blobs
+      const canvasNodes = dbNodes.map((n) => {
+        const cleanData = { ...n.data } as any;
+        if (cleanData.imageUrl) {
+          cleanData.imageUrl = '[image-binary-omitted]';
+        }
+        delete cleanData.onUpdate;
+        delete cleanData.onDelete;
+        delete cleanData.isOllamaOnline;
+        delete cleanData.llmConfig;
 
-Based on this current knowledge base:
-`;
-      }
+        return {
+          id: n.id,
+          type: n.type,
+          parentId: n.parentId || undefined,
+          title: cleanData.title || undefined,
+          content: cleanData.content || cleanData.description || undefined,
+          url: cleanData.url || undefined,
+          tags: cleanData.tags || undefined,
+          clusterColor: cleanData.clusterColor || undefined,
+        };
+      });
 
-      const fullPrompt = `${contextStr}User: ${userMsg}\n\nAssistant:`;
-      const response = await askLLM(fullPrompt, llmConfig);
+      const canvasEdges = dbEdges.map((e) => ({
+        sourceId: e.source,
+        targetId: e.target,
+        label: e.label || undefined,
+        isAIProposed: e.isAIProposed || undefined,
+      }));
 
+      const systemPrompt = `You are the specialized AI Assistant for the Personal Knowledge Canvas. Your purpose is to help the user brainstorm, organize, and analyze notes, bookmarks, and images mapped on their visual canvas. 
+
+RULES:
+1. Keep your answers concise, direct, and formatted in clean markdown. 
+2. Avoid generic introductions, long explanations, or generic troubleshooting categories.
+3. Base your answers directly on the nodes, concepts, and connections provided in the Canvas State. If the user asks 'how to use this', tell them they can create notes/links on the left, link them on the canvas, and click 'Analyze Canvas' to suggest connections.
+4. Help identify missing links, summarize concepts, or draft expansions for existing nodes.`;
+
+      const userContent = `Here is the current state of my canvas:
+Nodes:
+${JSON.stringify(canvasNodes, null, 2)}
+
+Edges/Connections:
+${JSON.stringify(canvasEdges, null, 2)}
+
+User Question: ${userMsg}`;
+
+      const payload = [
+        { role: 'system' as const, content: systemPrompt },
+        { role: 'user' as const, content: userContent }
+      ];
+
+      const response = await askLLM(payload, llmConfig);
       setChatMessages((prev) => [...prev, { role: 'assistant', content: response }]);
     } catch (err: any) {
       console.error(err);

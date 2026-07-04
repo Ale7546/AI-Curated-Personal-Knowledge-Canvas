@@ -35,20 +35,28 @@ export async function checkOllamaStatus(customUrl?: string): Promise<boolean> {
 /**
  * Route ask request dynamically based on LLM configuration settings.
  */
-export async function askLLM(prompt: string, config: LLMConfig, jsonMode = false): Promise<string> {
+export async function askLLM(
+  promptOrMessages: string | { role: 'system' | 'user' | 'assistant'; content: string }[],
+  config: LLMConfig,
+  jsonMode = false
+): Promise<string> {
   if (!config) {
     throw new Error('LLM configuration is missing.');
   }
 
+  const messages = typeof promptOrMessages === 'string'
+    ? [{ role: 'user' as const, content: promptOrMessages }]
+    : promptOrMessages;
+
   if (config.provider === 'ollama') {
     const url = config.url || '/api/ollama';
     const model = config.model || 'mistral';
-    const response = await fetch(`${url}/api/generate`, {
+    const response = await fetch(`${url}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: model,
-        prompt: prompt,
+        messages: messages,
         stream: false,
         format: jsonMode ? 'json' : undefined,
         options: { temperature: 0.2 }
@@ -56,7 +64,7 @@ export async function askLLM(prompt: string, config: LLMConfig, jsonMode = false
     });
     if (!response.ok) throw new Error(`Ollama model '${model}' failed to generate response.`);
     const data = await response.json();
-    return data.response;
+    return data.message.content;
   }
 
   if (config.provider === 'gemini') {
@@ -64,16 +72,36 @@ export async function askLLM(prompt: string, config: LLMConfig, jsonMode = false
     const model = config.model || 'gemini-1.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.apiKey}`;
     
+    const systemMessage = messages.find(m => m.role === 'system');
+    const conversationMessages = messages.filter(m => m.role !== 'system');
+    
+    const contents = conversationMessages.map(m => ({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.content }]
+    }));
+
+    if (contents.length === 0) {
+      contents.push({ role: 'user', parts: [{ text: '' }] });
+    }
+
+    const body: any = {
+      contents,
+      generationConfig: {
+        responseMimeType: jsonMode ? 'application/json' : 'text/plain',
+        temperature: 0.2
+      }
+    };
+
+    if (systemMessage) {
+      body.systemInstruction = {
+        parts: [{ text: systemMessage.content }]
+      };
+    }
+
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: jsonMode ? 'application/json' : 'text/plain',
-          temperature: 0.2
-        }
-      })
+      body: JSON.stringify(body)
     });
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
@@ -98,7 +126,7 @@ export async function askLLM(prompt: string, config: LLMConfig, jsonMode = false
       },
       body: JSON.stringify({
         model: model,
-        messages: [{ role: 'user', content: prompt }],
+        messages: messages,
         response_format: jsonMode ? { type: 'json_object' } : undefined,
         temperature: 0.2
       })
