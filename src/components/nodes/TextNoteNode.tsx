@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Sparkles, Trash2, Edit2, Check, X } from 'lucide-react';
+import { Sparkles, Trash2, Edit2, Check, X, MoreVertical } from 'lucide-react';
 
 import { generateTagsForNode } from '../../services/llmService';
 import type { LLMConfig } from '../../services/db';
@@ -22,6 +22,7 @@ export const TextNoteNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const [content, setContent] = useState(noteData.content || '');
   const [tagsInput, setTagsInput] = useState((noteData.tags || []).join(', '));
   const [isTagging, setIsTagging] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
 
   const handleSave = () => {
     const tags = tagsInput
@@ -124,14 +125,45 @@ export const TextNoteNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         <div className="node-display-view">
           <div className="node-header">
             <h3 className="node-title">{noteData.title || 'Untitled Note'}</h3>
-            <div className="node-actions nodrag">
-              <button className="btn-icon" onClick={() => setIsEditing(true)} title="Edit Note">
-                <Edit2 className="icon-sm" />
+            <div className="node-menu-container nodrag" onMouseLeave={() => setShowMenu(false)}>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMenu(!showMenu);
+                }}
+                title="Actions"
+              >
+                <MoreVertical className="icon-sm" />
               </button>
-              {noteData.onDelete && (
-                <button className="btn-icon btn-danger-hover" onClick={() => noteData.onDelete?.(id)} title="Delete Note">
-                  <Trash2 className="icon-sm" />
-                </button>
+              {showMenu && (
+                <div className="node-dropdown-menu">
+                  <button
+                    type="button"
+                    className="node-dropdown-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsEditing(true);
+                      setShowMenu(false);
+                    }}
+                  >
+                    <Edit2 className="icon-xs" style={{ width: 12, height: 12 }} /> Edit
+                  </button>
+                  {noteData.onDelete && (
+                    <button
+                      type="button"
+                      className="node-dropdown-item danger-hover"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        noteData.onDelete?.(id);
+                        setShowMenu(false);
+                      }}
+                    >
+                      <Trash2 className="icon-xs" style={{ width: 12, height: 12 }} /> Delete
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </div>

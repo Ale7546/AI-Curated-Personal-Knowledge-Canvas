@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Sparkles, Trash2, Edit2, Check, X, ExternalLink, Link2 } from 'lucide-react';
+import { Sparkles, Trash2, Edit2, Check, X, ExternalLink, Link2, MoreVertical } from 'lucide-react';
 
 import { generateTagsForNode } from '../../services/llmService';
 import type { LLMConfig } from '../../services/db';
@@ -24,6 +24,7 @@ export const LinkCardNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const [description, setDescription] = useState(cardData.description || '');
   const [tagsInput, setTagsInput] = useState((cardData.tags || []).join(', '));
   const [isTagging, setIsTagging] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
 
   // Extract domain name for neat display
   const getDomain = (urlString: string) => {
@@ -148,14 +149,45 @@ export const LinkCardNode: React.FC<NodeProps> = ({ id, data, selected }) => {
               <Link2 className="icon-link" />
               {url && <span className="domain-label">{getDomain(url)}</span>}
             </div>
-            <div className="node-actions nodrag">
-              <button className="btn-icon" onClick={() => setIsEditing(true)} title="Edit Link">
-                <Edit2 className="icon-sm" />
+            <div className="node-menu-container nodrag" onMouseLeave={() => setShowMenu(false)}>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMenu(!showMenu);
+                }}
+                title="Actions"
+              >
+                <MoreVertical className="icon-sm" />
               </button>
-              {cardData.onDelete && (
-                <button className="btn-icon btn-danger-hover" onClick={() => cardData.onDelete?.(id)} title="Delete Link">
-                  <Trash2 className="icon-sm" />
-                </button>
+              {showMenu && (
+                <div className="node-dropdown-menu">
+                  <button
+                    type="button"
+                    className="node-dropdown-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsEditing(true);
+                      setShowMenu(false);
+                    }}
+                  >
+                    <Edit2 className="icon-xs" style={{ width: 12, height: 12 }} /> Edit
+                  </button>
+                  {cardData.onDelete && (
+                    <button
+                      type="button"
+                      className="node-dropdown-item danger-hover"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cardData.onDelete?.(id);
+                        setShowMenu(false);
+                      }}
+                    >
+                      <Trash2 className="icon-xs" style={{ width: 12, height: 12 }} /> Delete
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </div>
