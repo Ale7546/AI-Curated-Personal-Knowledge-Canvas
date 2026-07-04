@@ -32,7 +32,7 @@ import {
 
 import { db } from './services/db';
 import type { LocalNode, LocalEdge, LocalUser, LLMConfig } from './services/db';
-import { checkOllamaStatus, analyzeCanvasConnections, askLLM } from './services/llmService';
+import { checkOllamaStatus, analyzeCanvasConnections, askLLM, buildAssistantPrompt } from './services/llmService';
 
 import { TextNoteNode } from './components/nodes/TextNoteNode';
 import { LinkCardNode } from './components/nodes/LinkCardNode';
@@ -777,27 +777,7 @@ export default function App() {
         isAIProposed: e.isAIProposed || undefined,
       }));
 
-      const systemPrompt = `You are the specialized AI Assistant for the Personal Knowledge Canvas. Your purpose is to help the user brainstorm, organize, and analyze notes, bookmarks, and images mapped on their visual canvas. 
-
-RULES:
-1. Keep your answers concise, direct, and formatted in clean markdown. 
-2. Avoid generic introductions, long explanations, or generic troubleshooting categories.
-3. Base your answers directly on the nodes, concepts, and connections provided in the Canvas State. If the user asks 'how to use this', tell them they can create notes/links on the left, link them on the canvas, and click 'Analyze Canvas' to suggest connections.
-4. Help identify missing links, summarize concepts, or draft expansions for existing nodes.`;
-
-      const userContent = `Here is the current state of my canvas:
-Nodes:
-${JSON.stringify(canvasNodes, null, 2)}
-
-Edges/Connections:
-${JSON.stringify(canvasEdges, null, 2)}
-
-User Question: ${userMsg}`;
-
-      const payload = [
-        { role: 'system' as const, content: systemPrompt },
-        { role: 'user' as const, content: userContent }
-      ];
+      const payload = buildAssistantPrompt(canvasNodes, canvasEdges, userMsg);
 
       const response = await askLLM(payload, llmConfig);
       setChatMessages((prev) => [...prev, { role: 'assistant', content: response }]);
