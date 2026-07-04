@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Sparkles,
   RefreshCw,
@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   User,
+  Upload,
 } from 'lucide-react';
 import type { LocalUser } from '../services/db';
 
@@ -29,6 +30,7 @@ interface SidebarControlsProps {
   setLeftSidebarCollapsed: (v: boolean) => void;
   setShowLLMSelector: (v: boolean) => void;
   onLogout: () => void;
+  onUploadDocument: (file: File) => void;
 }
 
 export const SidebarControls: React.FC<SidebarControlsProps> = ({
@@ -44,8 +46,10 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
   setLeftSidebarCollapsed,
   setShowLLMSelector,
   onLogout,
+  onUploadDocument,
 }) => {
   const [showPopover, setShowPopover] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getInitials = (username: string) => {
     const trimmed = username.trim();
@@ -102,6 +106,25 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
         </button>
         <button className="btn btn-secondary" onClick={() => addNode('clusterGroup')}>
           <FolderPlus className="icon-sm" /> Group Frame
+        </button>
+        
+        {/* Document upload triggers */}
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          style={{ display: 'none' }} 
+          accept=".txt,.md,.pdf" 
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              onUploadDocument(file);
+              // Clear input value so selecting the same file again triggers change
+              e.target.value = '';
+            }
+          }}
+        />
+        <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()}>
+          <Upload className="icon-sm" /> Upload Doc
         </button>
       </div>
 

@@ -60,5 +60,37 @@ The application supports multiple AI providers. You can change your active provi
 - **Grouping Cards**: Drag any node card inside a resizable **Group Frame**. Sub-nodes automatically nest, staying relative to the group layout and moving with the parent container.
 - **Editing Card Details**: Click the **Edit (Pencil)** icon on any node card to modify its title, URL, description, or tags. Click `Save` to commit changes to IndexedDB, or `Cancel` to discard.
 - **Auto-Generating Tags**: Click the **🔮 Sparkle** icon inside any note's edit view to let the selected LLM automatically scan the note text and generate relevant category hashtags.
-- **Deleting Cards**: Click the **Delete (Trashcan)** icon on any card to remove it and any of its connected link lines from the canvas workspace.
-- **Distraction-Free Mode**: Click the toggle tabs on the edges of the left and right sidebars to collapse them. A minimal header will slide down from the top center containing user information, AI status, configuration, and log out options.
+- **Deleting Cards**: Click the **More (three-dots)** icon on any card to open a dropdown menu with edit and delete options, preventing layout clutter.
+- **Distraction-Free Mode**: Click the toggle tabs on the edges of the left sidebar to collapse it. A minimal header will slide down from the top center containing user credentials, active AI status, configuration, and log out options.
+
+---
+
+## 🚀 Phase 3 Supercharged Features
+
+### 1. 📄 Document Uploads & Client-Side PDF Parsing
+- **Local Parsing**: Click the **Upload Doc** button in the left panel to import local `.txt`, `.md`, or `.pdf` files.
+- **Client-Side Extraction**: High-performance text parsing is handled completely inside the browser using `pdfjs-dist` connected to a public CDN worker.
+- **AI Auto-Summarization**: When a file is loaded, the local/cloud LLM is pinged in the background to analyze the content, auto-generating a 1-sentence summary and 3-5 relevant keyword tags for the node.
+
+### 2. 🎥 YouTube Integration & Watch Modals
+- **Auto-Conversion**: Paste a YouTube video URL into a bookmark card. The system automatically extracts the video ID and upgrades the node to a `youtubeCard` node.
+- **HQ Clipart Thumbnail**: Renders the video's official high-resolution clipart cover thumbnail.
+- **Interactive Player**: Click the play overlay to launch a beautiful, frosted-glass centered iframe player modal to watch the video directly on the canvas without leaving the application.
+
+### 3. 🧠 Local Canvas RAG (Retrieval-Augmented Generation)
+- **Tokenization & TF-IDF**: A local, client-side RAG engine (`ragService.ts`) indexes note text, bookmark descriptions, and document contents.
+- **Dynamic Context Injection**: When asking questions in the AI Assistant chat, the system calculates term frequencies and retrieves the top 3 matching chunks, injecting them as source citations into the LLM system prompt.
+
+### 4. 💬 Floating Resizable Chat Window
+- **Launcher Orb**: The AI companion collapses into a floating, pulsing violet bubble launcher in the bottom-right corner.
+- **Interactive Resize**: Click to expand it into a window. Hover over the top-left corner and drag to resize the chat window dynamically.
+- **Dockable Layout**: Dock the drawer back into a full-height right sidebar configuration at any time.
+
+### 5. 🔍 Coordinate Animations & Search Regrouping
+- **Glide Transitions**: Type tags or keywords in the chat panel's built-in search bar. All matching nodes glide smoothly to a central grid coordinate system using React Flow transitions.
+- **Visual Focus**: Unrelated cards and frames fade to a locked, faint opacity (`0.15`), and group frames are hidden. Clearing the search query glides cards back to their exact starting positions.
+
+### 6. 🫧 Organic SVG Bubble Clusters & Tag Wordclouds
+- **Wavy SVG Borders**: Group frames computed boundaries are wrapped in wavy organic SVG paths that adapt to enclosing child coordinates.
+- **Visual Wordcloud**: Shows a tag cloud at the top edge of the group bubble representing the most frequent keywords in the group, sized relative to their prominence.
+

@@ -1,9 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  ReactFlow,
-  Controls,
-  Background,
-  BackgroundVariant,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -20,34 +16,21 @@ import {
 } from 'lucide-react';
 
 import { db } from './services/db';
-import type { LocalNode, LocalEdge, LocalUser, LLMConfig } from './services/db';
-import { checkOllamaStatus, analyzeCanvasConnections, askLLM, buildAssistantPrompt } from './services/llmService';
-
-import { TextNoteNode } from './components/nodes/TextNoteNode';
-import { LinkCardNode } from './components/nodes/LinkCardNode';
-import { ImageCardNode } from './components/nodes/ImageCardNode';
-import { ClusterGroupNode } from './components/nodes/ClusterGroupNode';
-import { AIProposedEdge } from './components/edges/AIProposedEdge';
+import type { LocalNode, LocalEdge, LocalUser, LLMConfig, Message } from './services/db';
+import { checkOllamaStatus, analyzeCanvasConnections, askLLM, buildAssistantPrompt, generateUrlMetadata } from './services/llmService';
 
 import { AuthGateway } from './components/AuthGateway';
 import { LLMSelectorModal } from './components/LLMSelectorModal';
 import { SidebarControls } from './components/SidebarControls';
-import { ChatPanel } from './components/ChatPanel';
+import { Canvas } from './components/Canvas';
+import { FloatingChat } from './components/FloatingChat';
+import { retrieveContext } from './services/ragService';
+import { extractTextFromPDF } from './services/pdfService';
 
-const nodeTypes = {
-  textNote: TextNoteNode,
-  linkCard: LinkCardNode,
-  imageCard: ImageCardNode,
-  clusterGroup: ClusterGroupNode,
-};
-
-const edgeTypes = {
-  aiProposed: AIProposedEdge,
-};
-
-interface Message {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
+function extractYouTubeId(url: string): string | null {
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
 }
 
 // Inner Canvas Component that has access to useReactFlow
@@ -63,6 +46,9 @@ const CanvasWorkspace: React.FC<{
   setLeftSidebarCollapsed: (v: boolean) => void;
   setShowLLMSelector: (v: boolean) => void;
   onLogout: () => void;
+  searchQuery: string;
+  originalPositions: Record<string, { x: number; y: number }> | null;
+  setOriginalPositions: React.Dispatch<React.SetStateAction<Record<string, { x: number; y: number }> | null>>;
 }> = ({
   activeUser,
   isOllamaOnline,
@@ -75,6 +61,9 @@ const CanvasWorkspace: React.FC<{
   setLeftSidebarCollapsed,
   setShowLLMSelector,
   onLogout,
+  searchQuery,
+  originalPositions,
+  setOriginalPositions,
 }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -86,14 +75,82 @@ const CanvasWorkspace: React.FC<{
     async (nodeId: string, updatedData: any) => {
       const node = await db.nodes.get(nodeId);
       if (node) {
-        const newData = { ...node.data, ...updatedData };
-        await db.nodes.update(nodeId, { data: newData });
+        const finalData = { ...node.data, ...updatedData };
+        await db.nodes.update(nodeId, { data: finalData });
         setNodes((nds) =>
           nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...updatedData } } : n))
         );
+
+        // Background auto-metadata generation if a new URL is provided and LLM is configured
+        if (updatedData.url && updatedData.url !== node.data.url && llmConfig) {
+          const ytid = extractYouTubeId(updatedData.url);
+          if (ytid) {
+            // Transform node to youtubeCard!
+            await db.nodes.update(nodeId, { type: 'youtubeCard' });
+            const youtubeData = {
+              title: updatedData.title || 'YouTube Video',
+              url: updatedData.url,
+              videoId: ytid,
+              description: 'Analyzing video metadata...',
+              tags: ['video', 'youtube'],
+            };
+            await db.nodes.update(nodeId, { data: youtubeData });
+            setRefreshTrigger((prev) => prev + 1);
+
+            // Fetch metadata using LLM
+            try {
+              const metadata = await generateUrlMetadata(updatedData.url, llmConfig);
+              await db.nodes.update(nodeId, {
+                data: {
+                  ...youtubeData,
+                  title: metadata.title || youtubeData.title,
+                  description: metadata.description || 'No description available.',
+                  tags: [...youtubeData.tags, ...metadata.tags],
+                }
+              });
+              setRefreshTrigger((prev) => prev + 1);
+            } catch (err) {
+              console.error(err);
+              await db.nodes.update(nodeId, {
+                data: { ...youtubeData, description: 'Failed to retrieve video summary.' }
+              });
+              setRefreshTrigger((prev) => prev + 1);
+            }
+          } else {
+            // General link metadata auto-generation
+            try {
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === nodeId
+                    ? {
+                        ...n,
+                        data: {
+                          ...n.data,
+                          description: 'Generating AI summary...',
+                          tags: ['loading...'],
+                        },
+                      }
+                    : n
+                )
+              );
+
+              const metadata = await generateUrlMetadata(updatedData.url, llmConfig);
+              const mergedData = {
+                ...finalData,
+                title: finalData.title || metadata.title,
+                description: metadata.description,
+                tags: metadata.tags,
+              };
+              await db.nodes.update(nodeId, { data: mergedData });
+              setRefreshTrigger((prev) => prev + 1);
+            } catch (err) {
+              console.error(err);
+            }
+          }
+        }
       }
     },
-    [setNodes]
+    [setNodes, llmConfig, setRefreshTrigger]
   );
 
   // Delete a node, delete its edges, and unparent its children
@@ -174,7 +231,7 @@ const CanvasWorkspace: React.FC<{
         llmConfig: llmConfig || undefined,
       },
       style: n.type === 'clusterGroup' ? { width: n.width || 380, height: n.height || 280, zIndex: 1 } : { zIndex: 5 },
-      dragHandle: n.type === 'clusterGroup' ? '.cluster-header' : undefined,
+      dragHandle: n.type === 'clusterGroup' ? '.cluster-header-card' : undefined,
       extent: n.parentId ? 'parent' : undefined,
     }));
 
@@ -251,8 +308,8 @@ const CanvasWorkspace: React.FC<{
       for (const group of groupNodes) {
         const gx = group.position.x;
         const gy = group.position.y;
-        const gw = group.width || 450;
-        const gh = group.height || 380;
+        const gw = group.width || 380;
+        const gh = group.height || 280;
 
         const nx = draggedNode.position.x;
         const ny = draggedNode.position.y;
@@ -288,7 +345,7 @@ const CanvasWorkspace: React.FC<{
   );
 
   // Add node buttons handler (creates node near center of current screen)
-  const addNode = async (type: 'textNote' | 'linkCard' | 'imageCard' | 'clusterGroup') => {
+  const addNode = async (type: string) => {
     // Get flow coords for center of viewport
     const flowPosition = screenToFlowPosition({
       x: window.innerWidth / 2,
@@ -336,6 +393,18 @@ const CanvasWorkspace: React.FC<{
           tags: [],
         },
       };
+    } else if (type === 'documentCard') {
+      newNode = {
+        id: nodeId,
+        type: 'documentCard',
+        position: flowPosition,
+        data: {
+          title: 'New Document',
+          content: '',
+          description: '',
+          tags: [],
+        },
+      };
     } else {
       newNode = {
         id: nodeId,
@@ -351,6 +420,81 @@ const CanvasWorkspace: React.FC<{
 
     await db.nodes.put(newNode);
     setRefreshTrigger((prev) => prev + 1);
+  };
+
+  // Upload local PDF/text files and index contents in IndexedDB
+  const handleUploadDocument = async (file: File) => {
+    const flowPosition = screenToFlowPosition({
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+    });
+
+    const nodeId = `document-${Date.now()}`;
+    let content = '';
+    const ext = file.name.split('.').pop()?.toLowerCase();
+
+    if (ext === 'pdf') {
+      try {
+        const buffer = await file.arrayBuffer();
+        content = await extractTextFromPDF(buffer);
+      } catch (err) {
+        console.error('Failed to parse PDF:', err);
+        alert('Could not parse PDF text contents. Spawning empty document.');
+      }
+    } else {
+      content = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve((e.target?.result as string) || '');
+        reader.onerror = () => resolve('');
+        reader.readAsText(file);
+      });
+    }
+
+    const newNode: LocalNode = {
+      id: nodeId,
+      type: 'documentCard',
+      position: flowPosition,
+      data: {
+        title: file.name,
+        content: content,
+        description: 'Generating AI summary...',
+        tags: ['document'],
+      },
+    };
+
+    await db.nodes.put(newNode);
+    setRefreshTrigger((prev) => prev + 1);
+
+    if (llmConfig) {
+      try {
+        const prompt = `Analyze this document content:
+---
+${content.substring(0, 1500)}
+---
+Provide a JSON object containing:
+{
+  "description": "A 1-sentence summary of what this document is about",
+  "tags": ["3-5", "relevant", "lowercase", "keywords"]
+}
+Respond strictly in raw JSON format.`;
+
+        const res = await askLLM(prompt, llmConfig, true);
+        const cleaned = res.replace(/```json|```/gi, '').trim();
+        const parsed = JSON.parse(cleaned);
+
+        if (parsed.description || parsed.tags) {
+          await handleNodeUpdate(nodeId, {
+            description: parsed.description || 'No summary available.',
+            tags: Array.isArray(parsed.tags) ? parsed.tags.map((t: string) => t.toLowerCase()) : ['document'],
+          });
+        }
+      } catch (err) {
+        console.error('LLM document tagging failed:', err);
+        await handleNodeUpdate(nodeId, { description: 'Summary generation failed.' });
+      }
+    } else {
+      await handleNodeUpdate(nodeId, { description: 'LLM not configured for summary.' });
+    }
   };
 
   const handleAnalyzeCanvas = async () => {
@@ -552,21 +696,20 @@ const CanvasWorkspace: React.FC<{
   };
 
   return (
-    <div className={`canvas-container ${isAnalyzing ? 'canvas-scanning-pulse' : ''}`}>
-      <ReactFlow
+    <div className="canvas-wrapper-container" style={{ width: '100%', height: '100%', display: 'flex' }}>
+      <Canvas
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        fitView
-      >
-        <Controls position="bottom-left" />
-        <Background variant={BackgroundVariant.Dots} color="var(--bg-grid)" gap={16} size={1} />
-      </ReactFlow>
+        isAnalyzing={isAnalyzing}
+        searchQuery={searchQuery}
+        originalPositions={originalPositions}
+        setOriginalPositions={setOriginalPositions}
+        setNodes={setNodes}
+      />
 
       <SidebarControls
         activeUser={activeUser}
@@ -581,6 +724,7 @@ const CanvasWorkspace: React.FC<{
         setLeftSidebarCollapsed={setLeftSidebarCollapsed}
         setShowLLMSelector={setShowLLMSelector}
         onLogout={onLogout}
+        onUploadDocument={handleUploadDocument}
       />
     </div>
   );
@@ -595,7 +739,6 @@ export default function App() {
   const [isOllamaOnline, setIsOllamaOnline] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [isChatCollapsed, setIsChatCollapsed] = useState(false);
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
 
   const [chatMessages, setChatMessages] = useState<Message[]>([
@@ -606,6 +749,10 @@ export default function App() {
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
+
+  // Search states for canvas regrouping
+  const [searchQuery, setSearchQuery] = useState('');
+  const [originalPositions, setOriginalPositions] = useState<Record<string, { x: number; y: number }> | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -722,7 +869,21 @@ export default function App() {
         isAIProposed: e.isAIProposed || undefined,
       }));
 
-      const payload = buildAssistantPrompt(canvasNodes, canvasEdges, userMsg);
+      // Retrieve local RAG context
+      let retrievedChunks: string[] = [];
+      try {
+        const results = retrieveContext(userMsg, dbNodes, 3);
+        retrievedChunks = results.map(r => {
+          const type = r.node.type === 'documentCard' ? 'Document' : r.node.type === 'linkCard' ? 'Bookmark' : 'Note';
+          const title = r.node.data.title || 'Untitled';
+          const contentText = r.node.data.content || r.node.data.description || '';
+          return `[Source: ${type} "${title}"]\n${contentText}`;
+        });
+      } catch (err) {
+        console.error('RAG context retrieval failed:', err);
+      }
+
+      const payload = buildAssistantPrompt(canvasNodes, canvasEdges, userMsg, retrievedChunks);
 
       const response = await askLLM(payload, llmConfig);
       setChatMessages((prev) => [...prev, { role: 'assistant', content: response }]);
@@ -771,8 +932,8 @@ export default function App() {
         />
       )}
 
-      {/* Floating Status Header when both sidebars are collapsed */}
-      <div className={`floating-status-header ${leftSidebarCollapsed && isChatCollapsed ? 'visible' : ''}`}>
+      {/* Floating Status Header when left sidebar is collapsed */}
+      <div className={`floating-status-header ${leftSidebarCollapsed ? 'visible' : ''}`}>
         <div className="status-capsule">
           <span className="status-dot online" />
           <span>User: <strong>{activeUser.username}</strong></span>
@@ -804,12 +965,13 @@ export default function App() {
           setLeftSidebarCollapsed={setLeftSidebarCollapsed}
           setShowLLMSelector={setShowLLMSelector}
           onLogout={handleLogout}
+          searchQuery={searchQuery}
+          originalPositions={originalPositions}
+          setOriginalPositions={setOriginalPositions}
         />
       </ReactFlowProvider>
 
-      <ChatPanel
-        isChatCollapsed={isChatCollapsed}
-        setIsChatCollapsed={setIsChatCollapsed}
+      <FloatingChat
         isLlmOnline={isLlmOnline}
         llmConfig={llmConfig}
         chatMessages={chatMessages}
@@ -817,7 +979,8 @@ export default function App() {
         setChatInput={setChatInput}
         isChatLoading={isChatLoading}
         handleSendChatMessage={handleSendChatMessage}
-        messagesEndRef={messagesEndRef}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
       />
     </div>
   );

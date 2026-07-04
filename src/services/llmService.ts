@@ -225,9 +225,10 @@ export async function analyzeCanvasConnections(nodes: LocalNode[], config: LLMCo
 export function buildAssistantPrompt(
   canvasNodes: any[],
   canvasEdges: any[],
-  userQuery: string
+  userQuery: string,
+  retrievedChunks: string[] = []
 ): { role: 'system' | 'user' | 'assistant'; content: string }[] {
-  const systemInstruction = `You are "Canvas Companion," a warm, creative, and highly visual brainstorming partner. You are looking at an infinite knowledge canvas side-by-side with the user.
+  let systemInstruction = `You are "Canvas Companion," a warm, creative, and highly visual brainstorming partner. You are looking at an infinite knowledge canvas side-by-side with the user.
 
 CRITICAL GUIDELINES:
 1. DO NOT speak like an API or machine. Never say "Based on the provided canvas state...", "In the JSON data...", or "According to your nodes...".
@@ -240,6 +241,15 @@ CRITICAL GUIDELINES:
    - If multiple nodes (unconnected): Mention the cards by name and briefly suggest how they might relate. Remind the user they can draw lines between them, or click "Analyze Canvas" on the left to let the AI draft connections.
    - If connected nodes: Summarize the emerging web of thoughts. Point out any "lonely" nodes that don't have connections yet, asking how they fit into the bigger picture.
 6. Output formatting: You MUST use double-newlines (\\n\\n) between separate ideas, numbered points, or bullet list items. Do not merge list items into a single paragraph.`;
+
+  if (retrievedChunks.length > 0) {
+    systemInstruction += `\n\nADDITIONAL CONTEXT (RAG):
+You have searched the user's canvas and found these highly relevant notes/documents. Use these facts to answer the user's question accurately:
+---
+${retrievedChunks.join('\n\n')}
+---
+If the context doesn't contain the answer, use your general knowledge but mention that it was not found in their canvas documents.`;
+  }
 
   const userContent = `Here is the current state of my canvas:
 Nodes:
@@ -254,5 +264,47 @@ User Question: ${userQuery}`;
     { role: 'system', content: systemInstruction },
     { role: 'user', content: userContent }
   ];
+}
+
+export interface InferredMetadata {
+  title: string;
+  description: string;
+  tags: string[];
+}
+
+/**
+ * Uses the configured LLM to infer a title, description, and tags for a bookmark URL.
+ */
+export async function generateUrlMetadata(
+  url: string,
+  config: LLMConfig
+): Promise<InferredMetadata> {
+  const prompt = `Analyze this URL: "${url}". 
+Provide a JSON object containing:
+{
+  "title": "A concise title inferred from the URL (e.g., Python Tutorial)",
+  "description": "A 1-sentence summary of what this website likely contains",
+  "tags": ["3-5", "relevant", "lowercase", "keywords"]
+}
+Respond strictly in raw JSON format. Do not return markdown wrappers or conversational prefaces.`;
+
+  try {
+    const rawRes = await askLLM(prompt, config, true);
+    // Strip code block backticks if LLM returns them despite constraints
+    const cleaned = rawRes.replace(/```json|```/gi, '').trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      title: parsed.title || 'Inferred Bookmark',
+      description: parsed.description || `Bookmark for ${url}`,
+      tags: Array.isArray(parsed.tags) ? parsed.tags.map((t: string) => t.toLowerCase()) : []
+    };
+  } catch (e) {
+    console.error('LLM URL metadata generation failed: ', e);
+    return {
+      title: 'Bookmark',
+      description: `Reference link: ${url}`,
+      tags: []
+    };
+  }
 }
 

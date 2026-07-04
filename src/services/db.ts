@@ -2,17 +2,19 @@ import Dexie, { type Table } from 'dexie';
 
 export interface CanvasNodeData {
   title: string;
-  content: string;
+  content?: string;
   tags?: string[];
   imageUrl?: string; // base64 string or URL
   url?: string;      // URL for bookmark nodes
   description?: string;
   clusterColor?: string; // group background color palette (emerald, amber, violet, terracotta, ocean)
+  videoId?: string;      // YouTube video ID
+  onWatchVideo?: (videoId: string) => void;
 }
 
 export interface LocalNode {
   id: string;
-  type: 'textNote' | 'linkCard' | 'imageCard' | 'clusterGroup';
+  type: 'textNote' | 'linkCard' | 'imageCard' | 'clusterGroup' | 'documentCard' | 'youtubeCard';
   position: { x: number; y: number };
   width?: number;
   height?: number;
@@ -43,6 +45,11 @@ export interface LocalUser {
   username: string;
   passwordHash: string;
   llmConfig?: LLMConfig;
+}
+
+export interface Message {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
 }
 
 class KnowledgeCanvasDatabase extends Dexie {
