@@ -26,18 +26,22 @@ import {
   FileText,
   Trash2,
   FolderPlus,
+  LogOut,
+  Settings,
 } from 'lucide-react';
 
 import { db } from './services/db';
-import type { LocalNode, LocalEdge } from './services/db';
-import { checkOllamaStatus, analyzeCanvasConnections, askMistral } from './services/ollama';
-
+import type { LocalNode, LocalEdge, LocalUser, LLMConfig } from './services/db';
+import { checkOllamaStatus, analyzeCanvasConnections, askLLM } from './services/llmService';
 
 import { TextNoteNode } from './components/nodes/TextNoteNode';
 import { LinkCardNode } from './components/nodes/LinkCardNode';
 import { ImageCardNode } from './components/nodes/ImageCardNode';
 import { ClusterGroupNode } from './components/nodes/ClusterGroupNode';
 import { AIProposedEdge } from './components/edges/AIProposedEdge';
+
+import { AuthGateway } from './components/AuthGateway';
+import { LLMSelectorModal } from './components/LLMSelectorModal';
 
 const nodeTypes = {
   textNote: TextNoteNode,
@@ -62,7 +66,23 @@ const CanvasWorkspace: React.FC<{
   setIsAnalyzing: (v: boolean) => void;
   refreshTrigger: number;
   setRefreshTrigger: React.Dispatch<React.SetStateAction<number>>;
-}> = ({ isOllamaOnline, isAnalyzing, setIsAnalyzing, refreshTrigger, setRefreshTrigger }) => {
+  llmConfig: LLMConfig | null;
+  leftSidebarCollapsed: boolean;
+  setLeftSidebarCollapsed: (v: boolean) => void;
+  setShowLLMSelector: (v: boolean) => void;
+  onLogout: () => void;
+}> = ({
+  isOllamaOnline,
+  isAnalyzing,
+  setIsAnalyzing,
+  refreshTrigger,
+  setRefreshTrigger,
+  llmConfig,
+  leftSidebarCollapsed,
+  setLeftSidebarCollapsed,
+  setShowLLMSelector,
+  onLogout,
+}) => {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
@@ -158,10 +178,11 @@ const CanvasWorkspace: React.FC<{
         onUpdate: handleNodeUpdate,
         onDelete: handleNodeDelete,
         isOllamaOnline,
+        llmConfig: llmConfig || undefined,
       },
       style: n.type === 'clusterGroup' ? { width: n.width || 450, height: n.height || 380, zIndex: 1 } : { zIndex: 5 },
       dragHandle: n.type === 'clusterGroup' ? '.cluster-header' : undefined,
-      extent: n.parentId ? 'parent' : undefined, // restrict nodes to stay in their cluster parent container if nested!
+      extent: n.parentId ? 'parent' : undefined,
     }));
 
     // Map DB edges to React Flow Edges
@@ -187,6 +208,7 @@ const CanvasWorkspace: React.FC<{
     setEdges(flowEdges);
   }, [
     isOllamaOnline,
+    llmConfig,
     setNodes,
     setEdges,
     handleNodeUpdate,
@@ -199,7 +221,6 @@ const CanvasWorkspace: React.FC<{
   useEffect(() => {
     refreshCanvasFromDB();
   }, [refreshTrigger, refreshCanvasFromDB]);
-
 
   // Connection created manually by user dragging
   const onConnect = useCallback(
@@ -273,7 +294,6 @@ const CanvasWorkspace: React.FC<{
     [setNodes, setRefreshTrigger]
   );
 
-
   // Add node buttons handler (creates node near center of current screen)
   const addNode = async (type: 'textNote' | 'linkCard' | 'imageCard' | 'clusterGroup') => {
     // Get flow coords for center of viewport
@@ -341,10 +361,11 @@ const CanvasWorkspace: React.FC<{
   };
 
   const handleAnalyzeCanvas = async () => {
+    if (!llmConfig) return;
     setIsAnalyzing(true);
     try {
       const dbNodes = await db.nodes.toArray();
-      const { suggestions, clusters } = await analyzeCanvasConnections(dbNodes);
+      const { suggestions, clusters } = await analyzeCanvasConnections(dbNodes, llmConfig);
 
       // 1. Process proposed edges
       const existingEdges = await db.edges.toArray();
@@ -490,7 +511,6 @@ const CanvasWorkspace: React.FC<{
           tags: ['frontend', 'library', 'visual'],
         },
       },
-
     ];
 
     const demoEdges: LocalEdge[] = [
@@ -526,6 +546,18 @@ const CanvasWorkspace: React.FC<{
     }
   };
 
+  const isBrainReady = llmConfig
+    ? llmConfig.provider !== 'ollama' || isOllamaOnline
+    : false;
+
+  const getBrainStatusText = () => {
+    if (!llmConfig) return 'Not Configured';
+    if (llmConfig.provider === 'ollama') {
+      return isOllamaOnline ? `Ollama (${llmConfig.model})` : 'Ollama Offline';
+    }
+    return `${llmConfig.provider.toUpperCase()} Cloud`;
+  };
+
   return (
     <div className={`canvas-container ${isAnalyzing ? 'canvas-scanning-pulse' : ''}`}>
       <ReactFlow
@@ -544,14 +576,22 @@ const CanvasWorkspace: React.FC<{
       </ReactFlow>
 
       {/* Floating Left Control Sidebar */}
-      <div className="left-sidebar glass-panel nodrag">
+      <div className={`left-sidebar glass-panel nodrag ${leftSidebarCollapsed ? 'collapsed' : ''}`}>
+        <button
+          className="left-sidebar-toggle nodrag"
+          onClick={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
+          title={leftSidebarCollapsed ? 'Open Canvas Hub' : 'Collapse Panel'}
+        >
+          {leftSidebarCollapsed ? <ChevronRight className="icon" /> : <ChevronLeft className="icon" />}
+        </button>
+
         <h2 className="sidebar-title">
           <Database className="icon" /> Canvas Hub
         </h2>
 
         <div className="status-bar">
-          <span className={`status-dot ${isOllamaOnline ? 'online' : 'offline'}`} />
-          <span>Local Ollama: {isOllamaOnline ? 'Connected' : 'Offline'}</span>
+          <span className={`status-dot ${isBrainReady ? 'online' : 'offline'}`} />
+          <span>AI Status: {getBrainStatusText()}</span>
         </div>
 
         <div className="sidebar-section">
@@ -575,19 +615,25 @@ const CanvasWorkspace: React.FC<{
           <button
             className="btn btn-primary"
             onClick={handleAnalyzeCanvas}
-            disabled={!isOllamaOnline || isAnalyzing}
+            disabled={!isBrainReady || isAnalyzing}
           >
             <Sparkles className={`icon-sm ${isAnalyzing ? 'spinning' : ''}`} />
-            {isAnalyzing ? 'Scanning with Mistral...' : 'Analyze Canvas'}
+            {isAnalyzing ? 'Scanning with AI...' : 'Analyze Canvas'}
           </button>
         </div>
 
         <div className="sidebar-section" style={{ marginTop: 'auto' }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowLLMSelector(true)}>
+            <Settings className="icon-sm" /> AI Config
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={loadDemoData}>
-            <RefreshCw className="icon-sm" /> Load Demo Canvas
+            <RefreshCw className="icon-sm" /> Load Demo
           </button>
           <button className="btn btn-danger btn-sm" onClick={clearCanvas}>
-            <Trash2 className="icon-sm" /> Reset Workspace
+            <Trash2 className="icon-sm" /> Clear Canvas
+          </button>
+          <button className="btn btn-danger btn-sm" onClick={onLogout} style={{ marginTop: '8px' }}>
+            <LogOut className="icon-sm" /> Log Out
           </button>
         </div>
       </div>
@@ -597,10 +643,15 @@ const CanvasWorkspace: React.FC<{
 
 // Main App Component with ReactFlowProvider
 export default function App() {
+  const [activeUser, setActiveUser] = useState<LocalUser | null>(null);
+  const [llmConfig, setLlmConfig] = useState<LLMConfig | null>(null);
+  const [showLLMSelector, setShowLLMSelector] = useState(false);
+
   const [isOllamaOnline, setIsOllamaOnline] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
 
   const [chatMessages, setChatMessages] = useState<Message[]>([
     {
@@ -613,25 +664,78 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Check Ollama status on load and periodically
+  // Check for session on mount
+  useEffect(() => {
+    const loadSession = async () => {
+      const sessionId = localStorage.getItem('active_user_session');
+      if (sessionId) {
+        const user = await db.users.get(sessionId);
+        if (user) {
+          setActiveUser(user);
+          if (user.llmConfig) {
+            setLlmConfig(user.llmConfig);
+          } else {
+            setShowLLMSelector(true);
+          }
+        } else {
+          localStorage.removeItem('active_user_session');
+        }
+      }
+    };
+    loadSession();
+  }, []);
+
+  // Check Ollama status periodically if configured for Ollama
   useEffect(() => {
     const checkStatus = async () => {
-      const online = await checkOllamaStatus();
+      const targetUrl = llmConfig?.provider === 'ollama' ? llmConfig.url : undefined;
+      const online = await checkOllamaStatus(targetUrl);
       setIsOllamaOnline(online);
     };
     checkStatus();
     const interval = setInterval(checkStatus, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [llmConfig]);
 
   // Scroll to chat bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  const handleLoginSuccess = (user: LocalUser) => {
+    setActiveUser(user);
+    if (user.llmConfig) {
+      setLlmConfig(user.llmConfig);
+      setShowLLMSelector(false);
+    } else {
+      setLlmConfig(null);
+      setShowLLMSelector(true);
+    }
+  };
+
+  const handleSaveLLMConfig = async (config: LLMConfig) => {
+    if (activeUser) {
+      await db.users.update(activeUser.id, { llmConfig: config });
+      const updatedUser = await db.users.get(activeUser.id);
+      if (updatedUser) {
+        setActiveUser(updatedUser);
+      }
+      setLlmConfig(config);
+      setShowLLMSelector(false);
+      setRefreshTrigger((prev) => prev + 1);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('active_user_session');
+    setActiveUser(null);
+    setLlmConfig(null);
+    setShowLLMSelector(false);
+  };
+
   const handleSendChatMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || isChatLoading) return;
+    if (!chatInput.trim() || isChatLoading || !llmConfig) return;
 
     const userMsg = chatInput.trim();
     setChatInput('');
@@ -662,16 +766,16 @@ Based on this current knowledge base:
       }
 
       const fullPrompt = `${contextStr}User: ${userMsg}\n\nAssistant:`;
-      const response = await askMistral(fullPrompt);
+      const response = await askLLM(fullPrompt, llmConfig);
 
       setChatMessages((prev) => [...prev, { role: 'assistant', content: response }]);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       setChatMessages((prev) => [
         ...prev,
         {
           role: 'system',
-          content: 'Failed to communicate with local Mistral model. Ensure the Docker container is active.',
+          content: `Failed to communicate with AI brain: ${err.message || 'Verify credentials.'}`,
         },
       ]);
     } finally {
@@ -679,8 +783,57 @@ Based on this current knowledge base:
     }
   };
 
+  // Auth screen render if not signed in
+  if (!activeUser) {
+    return <AuthGateway onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  const showOnboarding = showLLMSelector || !llmConfig;
+
+  const isLlmOnline = llmConfig
+    ? llmConfig.provider !== 'ollama' || isOllamaOnline
+    : false;
+
+  const aiBrainName = llmConfig
+    ? llmConfig.provider === 'ollama'
+      ? `Local Ollama (${llmConfig.model})`
+      : llmConfig.provider === 'gemini'
+      ? `Gemini (${llmConfig.model})`
+      : `OpenAI (${llmConfig.model})`
+    : 'Not Configured';
+
   return (
     <div className="app-container">
+      {/* Onboarding Selector Overlay */}
+      {showOnboarding && (
+        <LLMSelectorModal
+          onSave={handleSaveLLMConfig}
+          currentConfig={llmConfig || undefined}
+          isClosable={!!llmConfig}
+          onClose={() => setShowLLMSelector(false)}
+        />
+      )}
+
+      {/* Floating Status Header when both sidebars are collapsed */}
+      <div className={`floating-status-header ${leftSidebarCollapsed && isChatCollapsed ? 'visible' : ''}`}>
+        <div className="status-capsule">
+          <span className="status-dot online" />
+          <span>User: <strong>{activeUser.username}</strong></span>
+        </div>
+        <div className="status-capsule-divider" />
+        <div className="status-capsule">
+          <span className={`status-dot ${isLlmOnline ? 'online' : 'offline'}`} />
+          <span>Brain: {aiBrainName}</span>
+        </div>
+        <div className="status-capsule-divider" />
+        <button className="btn btn-secondary btn-xs" onClick={() => setShowLLMSelector(true)}>
+          <Settings className="icon-xs" style={{ width: 12, height: 12 }} /> Config
+        </button>
+        <button className="btn btn-danger btn-xs" onClick={handleLogout}>
+          <LogOut className="icon-xs" style={{ width: 12, height: 12 }} /> Log Out
+        </button>
+      </div>
+
       <ReactFlowProvider>
         <CanvasWorkspace
           isOllamaOnline={isOllamaOnline}
@@ -688,6 +841,11 @@ Based on this current knowledge base:
           setIsAnalyzing={setIsAnalyzing}
           refreshTrigger={refreshTrigger}
           setRefreshTrigger={setRefreshTrigger}
+          llmConfig={llmConfig}
+          leftSidebarCollapsed={leftSidebarCollapsed}
+          setLeftSidebarCollapsed={setLeftSidebarCollapsed}
+          setShowLLMSelector={setShowLLMSelector}
+          onLogout={handleLogout}
         />
       </ReactFlowProvider>
 
@@ -710,8 +868,8 @@ Based on this current knowledge base:
             <MessageSquare className="icon" /> AI Assistant
           </h2>
           <div className="status-bar" style={{ marginTop: '8px' }}>
-            <span className={`status-dot ${isOllamaOnline ? 'online' : 'offline'}`} />
-            <span>Chat: {isOllamaOnline ? 'Canvas-Aware' : 'Offline'}</span>
+            <span className={`status-dot ${isLlmOnline ? 'online' : 'offline'}`} />
+            <span>Chat: {llmConfig ? (llmConfig.provider === 'ollama' ? 'Local Ollama' : 'Cloud API') : 'Offline'}</span>
           </div>
         </div>
 
@@ -739,9 +897,13 @@ Based on this current knowledge base:
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             placeholder={
-              isOllamaOnline ? 'Ask about your notes...' : 'Ollama Offline...'
+              !llmConfig
+                ? 'AI Brain not configured...'
+                : isLlmOnline
+                ? 'Ask about your notes...'
+                : 'Ollama Offline...'
             }
-            disabled={!isOllamaOnline || isChatLoading}
+            disabled={!isLlmOnline || isChatLoading}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -752,7 +914,7 @@ Based on this current knowledge base:
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={!isOllamaOnline || isChatLoading || !chatInput.trim()}
+            disabled={!isLlmOnline || isChatLoading || !chatInput.trim()}
           >
             Send
           </button>

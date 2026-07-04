@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Sparkles, Trash2, Edit2, Check, X } from 'lucide-react';
 
-import { generateTagsForNode } from '../../services/ollama';
+import { generateTagsForNode } from '../../services/llmService';
+import type { LLMConfig } from '../../services/db';
 
 export interface TextNoteNodeData {
   title: string;
@@ -11,6 +12,7 @@ export interface TextNoteNodeData {
   onUpdate?: (id: string, data: Partial<TextNoteNodeData>) => void;
   onDelete?: (id: string) => void;
   isOllamaOnline?: boolean;
+  llmConfig?: LLMConfig;
 }
 
 export const TextNoteNode: React.FC<NodeProps> = ({ id, data, selected }) => {
@@ -42,9 +44,10 @@ export const TextNoteNode: React.FC<NodeProps> = ({ id, data, selected }) => {
 
   const handleAutoTag = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!noteData.llmConfig) return;
     setIsTagging(true);
     try {
-      const generated = await generateTagsForNode(title, content);
+      const generated = await generateTagsForNode(title, content, noteData.llmConfig);
       if (generated && generated.length > 0) {
         setTagsInput(generated.join(', '));
         if (noteData.onUpdate) {
@@ -61,6 +64,7 @@ export const TextNoteNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       setIsTagging(false);
     }
   };
+
 
   return (
     <div className={`knowledge-node glass-panel text-note-node ${selected ? 'active' : ''}`}>
@@ -94,7 +98,7 @@ export const TextNoteNode: React.FC<NodeProps> = ({ id, data, selected }) => {
               onChange={(e) => setTagsInput(e.target.value)}
               placeholder="tags (comma separated)"
             />
-            {noteData.isOllamaOnline && (
+            {(noteData.llmConfig?.provider !== 'ollama' || noteData.isOllamaOnline) && (
               <button
                 type="button"
                 className="btn btn-secondary btn-icon-only"
@@ -105,6 +109,7 @@ export const TextNoteNode: React.FC<NodeProps> = ({ id, data, selected }) => {
                 <Sparkles className={`icon ${isTagging ? 'spinning' : ''}`} />
               </button>
             )}
+
           </div>
           <div className="node-actions-row">
             <button className="btn btn-primary btn-sm" onClick={handleSave}>

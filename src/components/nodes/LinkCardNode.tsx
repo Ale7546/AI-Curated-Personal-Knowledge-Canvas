@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Sparkles, Trash2, Edit2, Check, X, ExternalLink, Link2 } from 'lucide-react';
 
-import { generateTagsForNode } from '../../services/ollama';
+import { generateTagsForNode } from '../../services/llmService';
+import type { LLMConfig } from '../../services/db';
 
 export interface LinkCardNodeData {
   url: string;
@@ -12,6 +13,7 @@ export interface LinkCardNodeData {
   onUpdate?: (id: string, data: Partial<LinkCardNodeData>) => void;
   onDelete?: (id: string) => void;
   isOllamaOnline?: boolean;
+  llmConfig?: LLMConfig;
 }
 
 export const LinkCardNode: React.FC<NodeProps> = ({ id, data, selected }) => {
@@ -55,9 +57,10 @@ export const LinkCardNode: React.FC<NodeProps> = ({ id, data, selected }) => {
 
   const handleAutoTag = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!cardData.llmConfig) return;
     setIsTagging(true);
     try {
-      const generated = await generateTagsForNode(title, description);
+      const generated = await generateTagsForNode(title, description, cardData.llmConfig);
       if (generated && generated.length > 0) {
         setTagsInput(generated.join(', '));
         if (cardData.onUpdate) {
@@ -116,7 +119,7 @@ export const LinkCardNode: React.FC<NodeProps> = ({ id, data, selected }) => {
               onChange={(e) => setTagsInput(e.target.value)}
               placeholder="tags (comma separated)"
             />
-            {cardData.isOllamaOnline && (
+            {(cardData.llmConfig?.provider !== 'ollama' || cardData.isOllamaOnline) && (
               <button
                 type="button"
                 className="btn btn-secondary btn-icon-only"
@@ -128,6 +131,7 @@ export const LinkCardNode: React.FC<NodeProps> = ({ id, data, selected }) => {
               </button>
             )}
           </div>
+
           <div className="node-actions-row">
             <button className="btn btn-primary btn-sm" onClick={handleSave}>
               <Check className="icon-sm" /> Save

@@ -31,9 +31,24 @@ export interface LocalEdge {
   label?: string; // AI's connection reasoning
 }
 
+export interface LLMConfig {
+  provider: 'ollama' | 'gemini' | 'openai';
+  url?: string;
+  model?: string;
+  apiKey?: string;
+}
+
+export interface LocalUser {
+  id: string;
+  username: string;
+  passwordHash: string;
+  llmConfig?: LLMConfig;
+}
+
 class KnowledgeCanvasDatabase extends Dexie {
   nodes!: Table<LocalNode>;
   edges!: Table<LocalEdge>;
+  users!: Table<LocalUser>;
 
   constructor() {
     super('KnowledgeCanvasDB');
@@ -41,7 +56,13 @@ class KnowledgeCanvasDatabase extends Dexie {
       nodes: 'id, type, parentId',
       edges: 'id, source, target'
     });
+    this.version(2).stores({
+      nodes: 'id, type, parentId',
+      edges: 'id, source, target',
+      users: 'id, username'
+    });
   }
 }
 
 export const db = new KnowledgeCanvasDatabase();
+
